@@ -1,0 +1,192 @@
+# Production Docker Compose
+# Use: docker-compose -f docker-compose.prod.yml up -d
+
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: flying411-db-prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-flying411}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-securepassword}
+      POSTGRES_DB: ${DB_NAME:-flying411}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backup:/backup
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flying411"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - flying411-network
+
+  # Redis Cache (for Bull queues)
+  redis:
+    image: redis:7-alpine
+    container_name: flying411-redis
+    restart: always
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redispassword}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - flying411-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: flying411-backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${DB_USER:-flying411}:${DB_PASSWORD:-securepassword}@postgres:5432/${DB_NAME:-flying411}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redispassword}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:-supersecretjwtkey}
+      JWT_EXPIRES_IN: 7d
+      CORS_ORIGIN: ${FRONTEND_URL:-http://localhost:4000}
+      FLYING411_API_URL: ${FLYING411_API_URL}
+      FLYING411_API_KEY: ${FLYING411_API_KEY}
+      FLYING411_WEBHOOK_SECRET: ${FLYING411_WEBHOOK_SECRET}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:4001}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      UNSPLASH_ACCESS_KEY: ${UNSPLASH_ACCESS_KEY}
+      MAX_UPLOAD_SIZE: "25"
+      PRICE_COLLECTION_CRON: "0 2 * * *"
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - "4001:3000"
+    networks:
+      - flying411-network
+
+  # Frontend (Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: flying411-frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "4000:80"
+    networks:
+      - flying411-network
+
+  # Flying411 MySQL Database (PHP marketplace)
+  mysql:
+    image: mariadb:11.4
+    container_name: flying411-mysql
+    restart: always
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MARIADB_DATABASE: ${MYSQL_DB_NAME:-flying411_local}
+      MARIADB_USER: ${MYSQL_DB_USER:-flying411}
+      MARIADB_PASSWORD: ${MYSQL_DB_PASSWORD:-flying411pass}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./flying411-site/Flying411/flying411_db.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./flying411-site/Flying411/docker-init.sql:/docker-entrypoint-initdb.d/02-init.sql
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - flying411-network
+
+  # Flying411 PHP Site (Apache + PHP 8.3)
+  flying411-site:
+    build:
+      context: ./flying411-site/Flying411
+      dockerfile: Dockerfile
+    container_name: flying411-site
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      APP_DB_HOST: mysql
+      APP_DB_NAME: ${MYSQL_DB_NAME:-flying411_local}
+      APP_DB_USER: ${MYSQL_DB_USER:-flying411}
+      APP_DB_PASS: ${MYSQL_DB_PASSWORD:-flying411pass}
+      SYNC_API_KEY: ${FLYING411_API_KEY}
+      SYNC_WEBHOOK_SECRET: ${FLYING411_WEBHOOK_SECRET}
+      SYNC_VENDOR_ID: "1"
+      INVENTORY_APP_WEBHOOK_URL: http://backend:3000/api/webhooks/flying411
+    ports:
+      - "4002:80"
+    networks:
+      - flying411-network
+
+  # Database Backup (runs daily)
+  backup:
+    image: postgres:15-alpine
+    container_name: flying411-backup
+    restart: always
+    depends_on:
+      - postgres
+    environment:
+      PGHOST: postgres
+      PGUSER: ${DB_USER:-flying411}
+      PGPASSWORD: ${DB_PASSWORD:-securepassword}
+      PGDATABASE: ${DB_NAME:-flying411}
+    volumes:
+      - ./backup:/backup
+      - ./scripts:/scripts
+    entrypoint: /bin/sh
+    command: -c "while true; do /scripts/backup.sh; sleep 86400; done"
+    networks:
+      - flying411-network
+
+  traefik:
+    image: traefik:v3.0
+    container_name: flying411-traefik
+    restart: always
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${SSL_EMAIL:-admin@flying411.com}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+    networks:
+      - flying411-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:
+  letsencrypt:
+  mysql_data:
+
+networks:
+  flying411-network:
+    driver: bridge

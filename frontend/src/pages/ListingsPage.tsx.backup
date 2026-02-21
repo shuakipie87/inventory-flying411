@@ -1,0 +1,295 @@
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import {
+  Search,
+  SlidersHorizontal,
+  Eye,
+  ArrowRight,
+  Plane,
+  Calendar,
+  Tag,
+  X,
+  Grid3x3,
+  LayoutGrid,
+  Filter,
+  TrendingUp,
+  Sparkles,
+  Helicopter,
+  Rocket,
+  Settings,
+  DollarSign,
+  MapPin,
+  CheckCircle2,
+} from 'lucide-react';
+import api from '../services/api';
+import toast from 'react-hot-toast';
+
+const formatPrice = (price: string | number) => {
+  const num = Number(price);
+  if (num === 0.01) return 'Call For Price';
+  if (num >= 1000000) return `$${(num / 1000000).toFixed(2)}M`;
+  if (num >= 1000) return `$${(num / 1000).toFixed(0)}K`;
+  return `$${num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+};
+
+export default function ListingsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [listings, setListings] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
+  const [category, setCategory] = useState(searchParams.get('category') || '');
+  const [subcategory, setSubcategory] = useState(searchParams.get('subcategory') || '');
+  const [condition, setCondition] = useState(searchParams.get('condition') || '');
+  const [priceRange, setPriceRange] = useState<[number, number]>([0, 10000000]);
+  const [sortBy, setSortBy] = useState('recent');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [showFilters, setShowFilters] = useState(false);
+
+  useEffect(() => {
+    fetchListings();
+  }, [searchParams, sortBy]);
+
+  const fetchListings = async () => {
+    setIsLoading(true);
+    try {
+      const response = await api.get(`/listings?${searchParams.toString()}`);
+      let fetchedListings = response.data.data.listings || [];
+      
+      // Client-side sorting
+      if (sortBy === 'price-low') {
+        fetchedListings = [...fetchedListings].sort((a, b) => Number(a.price) - Number(b.price));
+      } else if (sortBy === 'price-high') {
+        fetchedListings = [...fetchedListings].sort((a, b) => Number(b.price) - Number(a.price));
+      } else if (sortBy === 'popular') {
+        fetchedListings = [...fetchedListings].sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0));
+      }
+      
+      setListings(fetchedListings);
+    } catch (error: any) {
+      toast.error('Failed to load listings');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const newParams = new URLSearchParams(searchParams);
+    if (searchQuery) newParams.set('search', searchQuery);
+    else newParams.delete('search');
+    if (category) newParams.set('category', category);
+    else newParams.delete('category');
+    setSearchParams(newParams);
+  };
+
+  return (
+    <div className="bg-gradient-to-br from-slate-50 via-white to-sky-50/30 min-h-screen pt-28 pb-20">
+      <div className="max-w-[1400px] mx-auto px-5 lg:px-10">
+        {/* Enhanced Page Header */}
+        <div className="mb-10">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8">
+            <div>
+              <h1 className="text-4xl md:text-5xl font-bold text-navy-900 mb-3 tracking-tight">
+                Aviation Marketplace
+              </h1>
+              <p className="text-slate-600 text-lg flex items-center gap-2">
+                Discover premium aviation assets from verified sellers
+              </p>
+            </div>
+            <div className="flex items-center gap-3 px-5 py-3 bg-white rounded-2xl shadow-sm border border-slate-200">
+              <Tag className="text-[#374356]" size={22} />
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold text-[#374356]">{listings.length}</span>
+                <span className="text-slate-500 font-medium">listings</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Enhanced Search & Filter Bar */}
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-6">
+            <form onSubmit={handleSearch} className="space-y-4">
+              {/* Search Input */}
+              <div className="flex flex-col lg:flex-row gap-3">
+                <div className="relative group flex-1">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#374356] transition-colors z-10" size={20} />
+                  <input
+                    type="text"
+                    placeholder="Search by title, manufacturer, model, part number..."
+                    className="w-full pl-12 pr-4 py-4 rounded-xl border-2 border-slate-200 focus:border-[#374356] focus:ring-4 focus:ring-[#374356]/10 transition-all outline-none text-slate-900 placeholder:text-slate-400 font-medium"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+
+                <div className="relative group">
+                  <select
+                    className="w-full lg:w-[200px] pl-4 pr-10 py-4 rounded-xl border-2 border-slate-200 focus:border-[#374356] focus:ring-4 focus:ring-[#374356]/10 appearance-none cursor-pointer transition-all outline-none text-slate-900 font-medium bg-white"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                  >
+                    <option value="">All Categories</option>
+                    <option value="Aircraft">Aircraft</option>
+                    <option value="Engines">Engines</option>
+                    <option value="Parts">Components</option>
+                  </select>
+                  <SlidersHorizontal className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
+                </div>
+
+                <button type="submit" className="btn-primary px-8 py-4 text-sm font-bold tracking-wide whitespace-nowrap">
+                  Search
+                </button>
+              </div>
+
+              {/* Sort Options */}
+              <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
+                <span className="text-sm font-medium text-slate-600">Sort by:</span>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: 'recent', label: 'Most Recent' },
+                    { value: 'popular', label: 'Most Popular' },
+                    { value: 'price-low', label: 'Price: Low to High' },
+                    { value: 'price-high', label: 'Price: High to Low' },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setSortBy(option.value)}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                        sortBy === option.value
+                          ? 'bg-[#374356] text-white shadow-md'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        {/* Listings Grid */}
+        {isLoading ? (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+              <div key={i} className="rounded-xl overflow-hidden bg-white border border-slate-100">
+                <div className="aspect-[4/3] bg-slate-100 animate-pulse" />
+                <div className="p-5 space-y-3">
+                  <div className="h-5 bg-slate-100 rounded animate-pulse w-3/4" />
+                  <div className="h-4 bg-slate-100 rounded animate-pulse w-1/2" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : listings.length === 0 ? (
+          <div className="text-center py-28 bg-white rounded-xl border border-dashed border-slate-200">
+            <div className="w-16 h-16 rounded-xl bg-slate-50 flex items-center justify-center mx-auto mb-6 border border-slate-100">
+              <Search className="text-slate-200" size={28} />
+            </div>
+            <h3 className="text-2xl font-serif text-navy-900 mb-2">No results found</h3>
+            <p className="text-slate-400 text-sm mb-8 max-w-sm mx-auto">Try adjusting your filters or search terms.</p>
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setCategory('');
+                setSearchParams(new URLSearchParams());
+              }}
+              className="btn-dark px-8 py-3"
+            >
+              Clear Filters
+            </button>
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {listings.map((listing) => (
+              <Link
+                key={listing.id}
+                to={`/listings/${listing.id}`}
+                className="group flex flex-col bg-white rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 overflow-hidden border border-slate-200 hover:border-[#374356]/30 hover:-translate-y-1"
+              >
+                {/* Enhanced Image */}
+                <div className="relative aspect-[4/3] bg-gradient-to-br from-slate-100 to-slate-200 overflow-hidden">
+                  {listing.images?.[0] ? (
+                    <img
+                      src={`/uploads/${listing.images[0].filename}`}
+                      alt={listing.title}
+                      loading="lazy"
+                      className="w-full h-full object-cover transition-all duration-500 group-hover:scale-110 group-hover:rotate-1"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-300">
+                      <Plane size={48} strokeWidth={1.5} />
+                    </div>
+                  )}
+
+                  {/* Gradient Overlay */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+                  {/* Category Badge */}
+                  <div className="absolute top-3 left-3">
+                    <span className="bg-[#374356] backdrop-blur-sm px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-white rounded-lg shadow-lg">
+                      {listing.category}
+                    </span>
+                  </div>
+
+                  {/* View Count */}
+                  {listing.viewCount > 0 && (
+                    <div className="absolute top-3 right-3">
+                      <span className="flex items-center gap-1.5 px-3 py-1.5 bg-white/95 backdrop-blur-md text-[11px] font-semibold text-slate-700 rounded-lg shadow-lg border border-white/50">
+                        <Eye size={12} className="text-[#374356]" /> {listing.viewCount}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Multiple Images Indicator */}
+                  {listing.images && listing.images.length > 1 && (
+                    <div className="absolute bottom-3 right-3">
+                      <span className="flex items-center gap-1 px-2.5 py-1 bg-black/70 backdrop-blur-md text-[10px] font-semibold text-white rounded-lg shadow-md">
+                        +{listing.images.length - 1} photos
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Enhanced Content */}
+                <div className="p-6 flex-1 flex flex-col">
+                  <h3 className="text-lg font-bold text-navy-900 mb-4 group-hover:text-[#374356] transition-colors leading-tight line-clamp-2 min-h-[3.5rem]">
+                    {listing.title}
+                  </h3>
+
+                  <div className="grid grid-cols-2 gap-4 mb-5 flex-1">
+                    <div className="flex items-start gap-2">
+                      <Calendar className="text-[#374356] mt-0.5 flex-shrink-0" size={16} />
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Year</span>
+                        <span className="text-sm font-bold text-slate-800">{listing.year || '—'}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Plane className="text-[#374356] mt-0.5 flex-shrink-0" size={16} />
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Total Time</span>
+                        <span className="text-sm font-bold text-slate-800 truncate">{listing.totalTime || '—'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-5 border-t-2 border-slate-100 mt-auto">
+                    <span className="text-xl font-bold text-[#374356]">
+                      {formatPrice(listing.price)}
+                    </span>
+                    <span className="flex items-center gap-2 text-[#374356] text-sm font-bold opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0">
+                      View
+                      <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                    </span>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

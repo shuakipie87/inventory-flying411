@@ -1,0 +1,21 @@
+# Default owner for everything
+* @shuakipie87
+
+# CI/CD and GitHub config
+.github/ @shuakipie87
+
+# Backend
+backend/ @shuakipie87
+
+# Frontend
+frontend/ @shuakipie87
+
+# Database migrations
+backend/prisma/ @shuakipie87
+
+# Infrastructure
+docker-compose*.yml @shuakipie87
+Dockerfile* @shuakipie87
+
+# E2E tests
+e2e/ @shuakipie87

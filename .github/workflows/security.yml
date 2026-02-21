@@ -1,0 +1,184 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  dependency-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: ./backend
+
+      - name: Audit backend dependencies (JSON report)
+        run: npm audit --json > backend-audit.json || true
+        working-directory: ./backend
+
+      - name: Audit backend dependencies (summary)
+        run: npm audit --audit-level=moderate >> $GITHUB_STEP_SUMMARY 2>&1 || true
+        working-directory: ./backend
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: ./frontend
+
+      - name: Audit frontend dependencies (JSON report)
+        run: npm audit --json > frontend-audit.json || true
+        working-directory: ./frontend
+
+      - name: Audit frontend dependencies (summary)
+        run: npm audit --audit-level=moderate >> $GITHUB_STEP_SUMMARY 2>&1 || true
+        working-directory: ./frontend
+
+      - name: Upload audit reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-reports
+          path: |
+            backend/backend-audit.json
+            frontend/frontend-audit.json
+          retention-days: 30
+
+  trivy-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Trivy scan backend
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: fs
+          scan-ref: ./backend
+          format: sarif
+          output: trivy-backend.sarif
+
+      - name: Trivy scan frontend
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: fs
+          scan-ref: ./frontend
+          format: sarif
+          output: trivy-frontend.sarif
+
+      - name: Upload backend SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-backend.sarif
+          category: trivy-backend
+
+      - name: Upload frontend SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-frontend.sarif
+          category: trivy-frontend
+
+  codeql-analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog secret detection
+        uses: trufflesecurity/trufflehog@v3.88.2
+        with:
+          extra_args: --only-verified
+
+      - name: Gitleaks secret detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  report:
+    needs:
+      - dependency-scan
+      - trivy-scan
+      - codeql-analysis
+      - secret-scan
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Generate security summary
+        env:
+          DEP_SCAN: ${{ needs.dependency-scan.result }}
+          TRIVY_SCAN: ${{ needs.trivy-scan.result }}
+          CODEQL: ${{ needs.codeql-analysis.result }}
+          SECRET_SCAN: ${{ needs.secret-scan.result }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          ## Security Scan Summary
+
+          | Scan | Result |
+          |------|--------|
+          | Dependency Scan | ${DEP_SCAN} |
+          | Trivy Scan | ${TRIVY_SCAN} |
+          | CodeQL SAST | ${CODEQL} |
+          | Secret Detection | ${SECRET_SCAN} |
+          EOF
+
+      - name: Notify monitoring webhook
+        if: env.MONITOR_WEBHOOK_URL != ''
+        env:
+          MONITOR_WEBHOOK_URL: ${{ secrets.MONITOR_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          DEP_SCAN: ${{ needs.dependency-scan.result }}
+          TRIVY_SCAN: ${{ needs.trivy-scan.result }}
+          CODEQL: ${{ needs.codeql-analysis.result }}
+          SECRET_SCAN: ${{ needs.secret-scan.result }}
+        run: |
+          JSON=$(jq -n \
+            --arg repository "$REPO" \
+            --arg run_id "$RUN_ID" \
+            --arg dependency_scan "$DEP_SCAN" \
+            --arg trivy_scan "$TRIVY_SCAN" \
+            --arg codeql_analysis "$CODEQL" \
+            --arg secret_scan "$SECRET_SCAN" \
+            '{repository: $repository, run_id: $run_id, dependency_scan: $dependency_scan, trivy_scan: $trivy_scan, codeql_analysis: $codeql_analysis, secret_scan: $secret_scan}')
+          curl -s -X POST "$MONITOR_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$JSON"

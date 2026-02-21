@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: flying411-db-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flying411
+      POSTGRES_PASSWORD: flying411pass
+      POSTGRES_DB: flying411_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - flying411-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flying411"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flying411-backend-prod
+    restart: unless-stopped
+    ports:
+      - "4001:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://flying411:flying411pass@postgres:5432/flying411_db?schema=public
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-this}
+      JWT_EXPIRES_IN: 7d
+      CORS_ORIGIN: http://localhost:4000
+      UNSPLASH_ACCESS_KEY: ${UNSPLASH_ACCESS_KEY:-}
+      UNSPLASH_SECRET_KEY: ${UNSPLASH_SECRET_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - flying411-network
+    command: sh -c "npx prisma generate && npm start"
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: flying411-frontend-prod
+    restart: unless-stopped
+    ports:
+      - "4000:80"
+    environment:
+      VITE_API_URL: http://localhost:5000/api
+    depends_on:
+      - backend
+    networks:
+      - flying411-network
+
+volumes:
+  postgres_data:
+
+networks:
+  flying411-network:
+    driver: bridge

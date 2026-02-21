@@ -1,0 +1,217 @@
+openapi: 3.0.3
+info:
+  title: Flying411 Inventory API
+  description: |
+    API for the Flying411 Aircraft Parts Inventory Management System.
+
+    ## Authentication
+    Most endpoints require JWT authentication. Include the token in cookies or Authorization header.
+
+    ## Rate Limits
+    - Auth endpoints: 5 requests/minute
+    - Listing creation: 20 requests/hour
+    - General API: 100 requests/minute
+  version: 1.0.0
+  contact:
+    email: api@flying411.com
+
+servers:
+  - url: http://localhost:3000/api
+    description: Development
+  - url: https://api.flying411.com/api
+    description: Production
+
+tags:
+  - name: Auth
+    description: Authentication endpoints
+  - name: Listings
+    description: Listing management
+  - name: Parts
+    description: Part search and pricing
+  - name: Admin
+    description: Admin-only endpoints
+  - name: Dashboard
+    description: User dashboard
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, username, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                username:
+                  type: string
+                  minLength: 3
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        "201":
+          description: User created
+        "400":
+          description: Validation error
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Login successful
+        "401":
+          description: Invalid credentials
+
+  /listings:
+    get:
+      tags: [Listings]
+      summary: Get all listings
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated listings
+
+    post:
+      tags: [Listings]
+      summary: Create listing
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListingInput"
+      responses:
+        "201":
+          description: Listing created
+
+  /listings/{id}:
+    get:
+      tags: [Listings]
+      summary: Get listing by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Listing details
+        "404":
+          description: Not found
+
+  /parts/search:
+    get:
+      tags: [Parts]
+      summary: Search parts
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: Search results
+
+  /parts/{partNumber}/pricing:
+    get:
+      tags: [Parts]
+      summary: Get pricing suggestion
+      parameters:
+        - name: partNumber
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: condition
+          in: query
+          schema:
+            type: string
+            enum: [new, overhauled, repaired, used]
+      responses:
+        "200":
+          description: Price suggestion
+
+  /admin/listings/pending:
+    get:
+      tags: [Admin]
+      summary: Get pending listings
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Pending listings
+        "403":
+          description: Admin required
+
+components:
+  schemas:
+    ListingInput:
+      type: object
+      required: [title, description, price, category]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        category:
+          type: string
+        condition:
+          type: string
+        partNumber:
+          type: string
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

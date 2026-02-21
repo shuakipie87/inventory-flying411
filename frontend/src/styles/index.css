@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --brand-navy: #142238;
+    --brand-sky: #0ea5e9;
+    --brand-orange: #f59e0b;
+    --brand-red: #dc2626;
+    --brand-gray: #94a3b8;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-white text-slate-800 font-sans;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: 'DM Serif Display', Georgia, serif;
+    @apply text-navy-900;
+  }
+
+  .font-display {
+    font-family: 'DM Serif Display', Georgia, serif;
+    @apply tracking-tight;
+  }
+
+  /* Better focus for accessibility */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-sky-500;
+  }
+}
+
+@layer components {
+
+  /* ── Buttons ── */
+  .btn {
+    @apply inline-flex items-center justify-center px-6 py-2.5 rounded-xl font-semibold text-sm tracking-wide transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 cursor-pointer select-none active:scale-[0.98] border border-transparent;
+  }
+
+  .btn-primary {
+    @apply text-white hover:opacity-90 focus-visible:ring-[#374356] shadow-sm hover:shadow-md;
+    background-color: #374356;
+  }
+
+  .btn-secondary {
+    @apply bg-slate-100 text-slate-700 hover:bg-slate-200 focus-visible:ring-slate-400 border-slate-200;
+  }
+
+  .btn-dark {
+    @apply bg-navy-900 text-white hover:bg-navy-800 focus-visible:ring-navy-700;
+  }
+
+  .btn-ghost {
+    @apply text-slate-600 hover:text-slate-900 hover:bg-slate-50 focus-visible:ring-slate-400;
+  }
+
+  .btn-outline-white {
+    @apply border-white/30 text-white hover:bg-white hover:text-navy-900 backdrop-blur-sm;
+  }
+
+  .btn-danger {
+    @apply bg-red-50 text-red-600 border-red-200 hover:bg-red-600 hover:text-white hover:border-red-600 focus-visible:ring-red-500;
+  }
+
+  /* ── Glassmorphism ── */
+  .glass {
+    @apply bg-white/10 backdrop-blur-md border border-white/20;
+  }
+
+  .glass-dark {
+    @apply bg-navy-950/40 backdrop-blur-xl border border-white/10;
+  }
+
+  /* ── Inputs ── */
+  .input {
+    @apply w-full px-4 py-3 bg-white border border-slate-200 rounded-lg text-sm transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-400 placeholder:text-slate-400 font-sans;
+  }
+
+  /* ── Cards ── */
+  .card {
+    @apply bg-white rounded-xl shadow-card border border-slate-100 p-6 transition-all duration-200;
+  }
+
+  .card-hover {
+    @apply hover:shadow-card-hover hover:-translate-y-0.5;
+  }
+
+  .card-premium {
+    @apply relative overflow-hidden bg-white border border-slate-100 rounded-xl shadow-card transition-all duration-300 hover:shadow-card-hover hover:-translate-y-1;
+  }
+
+  /* ── Badges ── */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-md;
+  }
+
+  .badge-new {
+    @apply bg-red-50 text-red-600;
+  }
+
+  .badge-approved, .badge-active {
+    @apply bg-emerald-50 text-emerald-700;
+  }
+
+  .badge-pending, .badge-pending_approval {
+    @apply bg-amber-50 text-amber-700;
+  }
+
+  .badge-rejected {
+    @apply bg-red-50 text-red-600;
+  }
+
+  .badge-draft {
+    @apply bg-slate-100 text-slate-600;
+  }
+
+  .badge-sold {
+    @apply bg-sky-50 text-sky-700;
+  }
+
+  /* ── Divider ── */
+  .divider {
+    @apply border-t border-slate-100 my-2;
+  }
+
+  /* ── Skeleton Loading ── */
+  .skeleton {
+    @apply bg-slate-100 rounded-lg animate-pulse;
+  }
+
+  /* ── Section Label ── */
+  .section-label {
+    @apply text-xs font-semibold text-slate-400 uppercase tracking-wider;
+  }
+}
+
+/* ── Custom Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-200 rounded-full hover:bg-slate-300;
+}
+
+/* ── Selection ── */
+::selection {
+  @apply bg-sky-100 text-sky-900;
+}

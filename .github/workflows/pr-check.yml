@@ -1,0 +1,272 @@
+name: PR Quality Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  code-quality-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./backend
+
+      - name: Lint (ESLint)
+        run: npm run lint
+        working-directory: ./backend
+
+      - name: Format check (Prettier)
+        run: npm run format:check
+        working-directory: ./backend
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+        working-directory: ./backend
+
+  code-quality-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./frontend
+
+      - name: Lint (ESLint)
+        run: npm run lint
+        working-directory: ./frontend
+
+      - name: Format check (Prettier)
+        run: npm run format:check
+        working-directory: ./frontend
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+        working-directory: ./frontend
+
+  test-coverage-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: flying411
+          POSTGRES_PASSWORD: flying411pass
+          POSTGRES_DB: flying411_test
+        options: >-
+          --health-cmd "pg_isready"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./backend
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: ./backend
+
+      - name: Run Prisma migrations
+        run: npx prisma migrate deploy
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://flying411:flying411pass@localhost:5432/flying411_test
+
+      - name: Run tests with coverage
+        run: npm run test:coverage
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://flying411:flying411pass@localhost:5432/flying411_test
+          JWT_SECRET: test-secret-key
+          NODE_ENV: test
+          REDIS_URL: redis://localhost:6379
+
+  test-coverage-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./frontend
+
+      - name: Run tests with coverage
+        run: npm run test:coverage
+        working-directory: ./frontend
+
+      - name: Enforce 70% coverage threshold
+        working-directory: ./frontend
+        run: |
+          COVERAGE=$(node -e "
+            const report = require('./coverage/coverage-summary.json');
+            const { lines, branches, functions } = report.total;
+            const avg = (lines.pct + branches.pct + functions.pct) / 3;
+            console.log(Math.round(avg));
+          ")
+          echo "Total coverage: ${COVERAGE}%"
+          if [ "$COVERAGE" -lt 70 ]; then
+            echo "::error::Coverage ${COVERAGE}% is below the 70% threshold"
+            exit 1
+          fi
+
+  security-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: ./backend
+
+      - name: Audit backend dependencies
+        run: npm audit --package-lock-only --audit-level=high
+        working-directory: ./backend
+        continue-on-error: true
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: ./frontend
+
+      - name: Audit frontend dependencies
+        run: npm audit --package-lock-only --audit-level=high
+        working-directory: ./frontend
+        continue-on-error: true
+
+      - name: TruffleHog secret detection
+        uses: trufflesecurity/trufflehog@v3.88.2
+        with:
+          extra_args: --only-verified
+
+  dependency-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@v3
+        with:
+          fail-on-severity: moderate
+          comment-summary-in-pr: always
+
+  pr-summary:
+    needs:
+      - code-quality-backend
+      - code-quality-frontend
+      - test-coverage-backend
+      - test-coverage-frontend
+      - security-scan
+      - dependency-review
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Post PR summary comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const jobs = {
+              'Code Quality (Backend)': '${{ needs.code-quality-backend.result }}',
+              'Code Quality (Frontend)': '${{ needs.code-quality-frontend.result }}',
+              'Test Coverage (Backend)': '${{ needs.test-coverage-backend.result }}',
+              'Test Coverage (Frontend)': '${{ needs.test-coverage-frontend.result }}',
+              'Security Scan': '${{ needs.security-scan.result }}',
+              'Dependency Review': '${{ needs.dependency-review.result }}'
+            };
+            const statusEmoji = (s) => s === 'success' ? '\u2705' : s === 'failure' ? '\u274c' : '\u26a0\ufe0f';
+            let table = '| Check | Status |\n|-------|--------|\n';
+            for (const [name, result] of Object.entries(jobs)) {
+              table += `| ${name} | ${statusEmoji(result)} ${result} |\n`;
+            }
+            const body = `## PR Quality Check Results\n\n${table}\n[View full pipeline \u2192](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n\n---\n*Generated by CI/CD Pipeline*`;
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const botComment = comments.find(c => c.body.includes('PR Quality Check Results'));
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                comment_id: botComment.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }

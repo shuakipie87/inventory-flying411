@@ -1,0 +1,68 @@
+# Flying411 Production Dockerfile
+# Multi-stage build for optimized production image
+
+# Stage 1: Build (using Alpine for smaller build image)
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files (including package-lock.json)
+COPY package.json package-lock.json ./
+COPY prisma ./prisma/
+
+# Install ALL dependencies (including dev for tsc)
+RUN npm ci && npm cache clean --force
+
+# Copy source
+COPY . .
+
+# Generate Prisma client
+RUN npx prisma generate
+
+# Build TypeScript
+RUN npm run build
+
+# Compile seed separately (prisma/ is outside src rootDir)
+RUN npx tsc prisma/seed.ts --outDir dist/prisma --esModuleInterop --skipLibCheck --module commonjs --target ES2020 --resolveJsonModule --allowSyntheticDefaultImports
+
+# Remove dev dependencies after build
+RUN npm prune --omit=dev
+
+# Stage 2: Production (using slim for better Prisma OpenSSL compatibility)
+FROM node:20-slim AS production
+
+WORKDIR /app
+
+# Install OpenSSL for Prisma and wget for health check
+RUN apt-get update && apt-get install -y openssl wget --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN groupadd -g 1001 nodejs && \
+    useradd -u 1001 -g nodejs -m nodejs
+
+# Copy built assets from builder
+COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
+COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nodejs:nodejs /app/package*.json ./
+
+# Create directories needed at runtime
+RUN mkdir -p /app/logs /app/uploads && chown -R nodejs:nodejs /app/logs /app/uploads
+
+# Set environment
+ENV NODE_ENV=production
+ENV PORT=3000
+
+# Switch to non-root user
+USER nodejs
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+# Start application
+CMD ["node", "dist/server.js"]

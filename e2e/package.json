@@ -1,0 +1,16 @@
+{
+    "name": "flying411-e2e",
+    "version": "1.0.0",
+    "description": "E2E tests for Flying411 Inventory Management",
+    "scripts": {
+        "cypress:open": "cypress open",
+        "cypress:run": "cypress run",
+        "test:e2e": "cypress run --browser chrome",
+        "test:e2e:headless": "cypress run --headless"
+    },
+    "devDependencies": {
+        "cypress": "^13.6.2",
+        "@testing-library/cypress": "^10.0.1",
+        "cypress-file-upload": "^5.0.8"
+    }
+}

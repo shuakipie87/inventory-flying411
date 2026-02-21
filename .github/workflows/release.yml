@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-release:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Get Release Metadata
+        id: meta
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGES=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          else
+            CHANGES=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push backend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            flying411/backend:${{ steps.meta.outputs.version }}
+            flying411/backend:latest
+
+      - name: Build and push frontend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            flying411/frontend:${{ steps.meta.outputs.version }}
+            flying411/frontend:latest
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release v${{ needs.build-release.outputs.version }}
+          body: |
+            ## What's Changed
+
+            ${{ needs.build-release.outputs.changelog }}
+
+            ## Docker Images
+
+            ```bash
+            docker pull flying411/backend:${{ needs.build-release.outputs.version }}
+            docker pull flying411/frontend:${{ needs.build-release.outputs.version }}
+            ```
+
+            ---
+            *Full Changelog: https://github.com/${{ github.repository }}/compare/...v${{ needs.build-release.outputs.version }}*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+
+  notify:
+    name: Notify
+    needs: [build-release, create-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    steps:
+      - name: Slack Notification
+        run: |
+          if [ -n "$SLACK_WEBHOOK" ]; then
+            curl -X POST "$SLACK_WEBHOOK" -H "Content-Type: application/json" \
+              --data-raw "{\"text\":\"Release Flying411 v${RELEASE_VERSION} published. ${RELEASE_URL}\"}"
+          fi
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          RELEASE_VERSION: ${{ needs.build-release.outputs.version }}
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+
+      - name: Monitor Webhook
+        run: |
+          if [ -n "$MONITOR_WEBHOOK_URL" ]; then
+            # Use jq to safely construct JSON, preventing injection via tag names or actor values
+            JSON=$(jq -n \
+              --arg event "release_published" \
+              --arg version "v${RELEASE_VERSION}" \
+              --arg tag "${REF_NAME}" \
+              --arg workflow "Release" \
+              --arg run_id "${RUN_ID}" \
+              --arg sha "${COMMIT_SHA}" \
+              --arg actor "${ACTOR}" \
+              --arg repository "${REPOSITORY}" \
+              '{event: $event, version: $version, tag: $tag, workflow: $workflow, run_id: $run_id, sha: $sha, actor: $actor, repository: $repository}')
+            curl -s -X POST "$MONITOR_WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d "$JSON" || true
+          fi
+        env:
+          MONITOR_WEBHOOK_URL: ${{ secrets.MONITOR_WEBHOOK_URL }}
+          RELEASE_VERSION: ${{ needs.build-release.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          REPOSITORY: ${{ github.repository }}

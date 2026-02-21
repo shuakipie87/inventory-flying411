@@ -1,0 +1,383 @@
+// Flying411 Database Schema
+// This is your Prisma schema file
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  SOLD
+  ARCHIVED
+}
+
+enum SyncStatus {
+  NEVER_SYNCED
+  PENDING_SYNC
+  SYNCING
+  SYNCED
+  SYNC_FAILED
+}
+
+enum UploadStatus {
+  PENDING
+  PARSING
+  MAPPING
+  REVIEWING
+  IMPORTING
+  COMPLETED
+  FAILED
+}
+
+enum UploadRowStatus {
+  PENDING
+  MATCHED
+  UNMATCHED
+  ERROR
+  IMPORTED
+}
+
+enum PriceSource {
+  INTERNAL
+  FLYING411
+  MARKET
+  MANUAL
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  username      String    @unique
+  passwordHash  String    @map("password_hash")
+  role          UserRole  @default(USER)
+  isActive      Boolean   @default(true) @map("is_active")
+  emailVerified Boolean   @default(false) @map("email_verified")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  lastLogin     DateTime? @map("last_login")
+
+  listings       Listing[]
+  reviews        Review[]
+  uploadSessions UploadSession[]
+
+  @@index([email])
+  @@index([username])
+  @@map("users")
+}
+
+model Listing {
+  id                 String        @id @default(uuid())
+  title              String
+  description        String        @db.Text
+  price              Decimal       @db.Decimal(10, 2)
+  category           String
+  subcategory        String?
+  condition          String
+  year               Int?
+  totalTime          String?       @map("total_time")
+  engineInfo         String?       @map("engine_info")
+  location           String?
+  quantity           Int           @default(1)
+  status             ListingStatus @default(DRAFT)
+  rejectionReason    String?       @map("rejection_reason")
+  flying411ListingId String?       @unique @map("flying411_listing_id")
+  syncedAt           DateTime?     @map("synced_at")
+  viewCount          Int           @default(0) @map("view_count")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+  publishedAt        DateTime?     @map("published_at")
+
+  syncStatus        SyncStatus @default(NEVER_SYNCED) @map("sync_status")
+  syncError         String?    @map("sync_error")
+  syncAttempts      Int        @default(0) @map("sync_attempts")
+  lastSyncAttemptAt DateTime?  @map("last_sync_attempt_at")
+  manufacturer      String?
+  serialNumber      String?    @map("serial_number")
+  registrationNo    String?    @map("registration_no")
+  city              String?
+  state             String?
+  country           String?
+  currency          String     @default("USD")
+  aircraftData      Json?      @map("aircraft_data")
+  engineData        Json?      @map("engine_data")
+  partData          Json?      @map("part_data")
+
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  aircraftId String?   @map("aircraft_id")
+  aircraft   Aircraft? @relation(fields: [aircraftId], references: [id])
+
+  engineId String? @map("engine_id")
+  engine   Engine? @relation(fields: [engineId], references: [id])
+
+  images            ListingImage[]
+  reviews           Review[]
+  uploadSessionRows UploadSessionRow[]
+
+  @@index([userId])
+  @@index([aircraftId])
+  @@index([engineId])
+  @@index([status])
+  @@index([category])
+  @@index([createdAt])
+  @@index([flying411ListingId])
+  @@map("listings")
+}
+
+model ListingImage {
+  id            String   @id @default(uuid())
+  filename      String
+  originalName  String   @map("original_name")
+  mimeType      String   @map("mime_type")
+  size          Int
+  path          String
+  thumbnailPath String?  @map("thumbnail_path")
+  webpPath      String?  @map("webp_path")
+  category      String? // 'front_view', 'rear_view', 'serial_number', 'damage', 'documentation', 'other'
+  isPrimary     Boolean  @default(false) @map("is_primary")
+  order         Int      @default(0)
+  processed     Boolean  @default(false) // Async processing complete
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  listingId String  @map("listing_id")
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@map("listing_images")
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  comment   String   @db.Text
+  action    String // 'APPROVE' or 'REJECT'
+  createdAt DateTime @default(now()) @map("created_at")
+
+  listingId String  @map("listing_id")
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  reviewerId String @map("reviewer_id")
+  reviewer   User   @relation(fields: [reviewerId], references: [id])
+
+  @@index([listingId])
+  @@index([reviewerId])
+  @@map("reviews")
+}
+
+// Part master database for auto-detection
+model Part {
+  id           String   @id @default(uuid())
+  partNumber   String   @unique @map("part_number")
+  manufacturer String
+  description  String   @db.Text
+  category     String
+  model        String?
+  alternates   String[] // Alternate part numbers
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  priceHistory      PriceHistory[]
+  uploadSessionRows UploadSessionRow[]
+
+  @@index([partNumber])
+  @@index([manufacturer])
+  @@index([category])
+  @@map("parts")
+}
+
+// Price history for pricing suggestions
+model PriceHistory {
+  id         String      @id @default(uuid())
+  condition  String // 'new', 'used', 'overhauled', 'repaired'
+  price      Decimal     @db.Decimal(10, 2)
+  source     PriceSource @default(INTERNAL)
+  recordedAt DateTime    @default(now()) @map("recorded_at")
+
+  partId String @map("part_id")
+  part   Part   @relation(fields: [partId], references: [id], onDelete: Cascade)
+
+  vendorId String? @map("vendor_id")
+  vendor   Vendor? @relation(fields: [vendorId], references: [id])
+
+  @@index([partId])
+  @@index([condition])
+  @@index([vendorId])
+  @@map("price_history")
+}
+
+// Audit log for admin actions
+model AuditLog {
+  id         String   @id @default(uuid())
+  action     String // 'approve', 'reject', 'user_update', etc.
+  entityType String   @map("entity_type") // 'listing', 'user'
+  entityId   String   @map("entity_id")
+  details    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  adminId String @map("admin_id")
+
+  @@index([adminId])
+  @@index([entityType])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SyncLog {
+  id         String   @id @default(uuid())
+  listingId  String   @map("listing_id")
+  action     String
+  direction  String
+  status     String
+  externalId String?  @map("external_id")
+  error      String?  @db.Text
+  duration   Int?
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([listingId])
+  @@index([createdAt])
+  @@index([status])
+  @@map("sync_logs")
+}
+
+// Aircraft reference database
+model Aircraft {
+  id             String   @id @default(uuid())
+  manufacturer   String
+  model          String
+  series         String?
+  typeDesignator String?  @map("type_designator")
+  variants       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  listings Listing[]
+
+  @@unique([manufacturer, model])
+  @@index([manufacturer])
+  @@map("aircraft")
+}
+
+// Engine reference database
+model Engine {
+  id             String   @id @default(uuid())
+  manufacturer   String
+  model          String
+  series         String?
+  typeDesignator String?  @map("type_designator")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  listings Listing[]
+
+  @@unique([manufacturer, model])
+  @@index([manufacturer])
+  @@map("engines")
+}
+
+// External vendor for market data aggregation
+model Vendor {
+  id          String   @id @default(uuid())
+  name        String
+  code        String   @unique
+  apiUrl      String?  @map("api_url")
+  apiKey      String?  @map("api_key")
+  adapterType String   @map("adapter_type")
+  isActive    Boolean  @default(true) @map("is_active")
+  config      Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  marketInventory MarketInventory[]
+  priceHistory    PriceHistory[]
+
+  @@map("vendors")
+}
+
+// Aggregated market inventory from external vendors
+model MarketInventory {
+  id           String   @id @default(uuid())
+  partNumber   String   @map("part_number")
+  vendorId     String   @map("vendor_id")
+  vendorPartId String?  @map("vendor_part_id")
+  price        Decimal  @db.Decimal(10, 2)
+  currency     String   @default("USD")
+  quantity     Int
+  condition    String?
+  lastSeen     DateTime @map("last_seen")
+  sourceUrl    String?  @map("source_url")
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([partNumber, vendorId, vendorPartId])
+  @@index([partNumber])
+  @@index([vendorId])
+  @@map("market_inventory")
+}
+
+// Bulk upload session tracking
+model UploadSession {
+  id                  String       @id @default(uuid())
+  userId              String       @map("user_id")
+  filename            String
+  originalName        String       @map("original_name")
+  mimeType            String       @map("mime_type")
+  fileSize            Int          @map("file_size")
+  status              UploadStatus @default(PENDING)
+  totalRows           Int          @default(0) @map("total_rows")
+  processedRows       Int          @default(0) @map("processed_rows")
+  errorRows           Int          @default(0) @map("error_rows")
+  columnMapping       Json?        @map("column_mapping")
+  aiMappingConfidence Float?       @map("ai_mapping_confidence")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+
+  user User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rows UploadSessionRow[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("upload_sessions")
+}
+
+// Individual rows within an upload session
+model UploadSessionRow {
+  id              String          @id @default(uuid())
+  sessionId       String          @map("session_id")
+  rowNumber       Int             @map("row_number")
+  rawData         Json            @map("raw_data")
+  mappedData      Json?           @map("mapped_data")
+  status          UploadRowStatus @default(PENDING)
+  matchConfidence Float?          @map("match_confidence")
+  matchedPartId   String?         @map("matched_part_id")
+  errors          Json?
+  listingId       String?         @map("listing_id")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  session     UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  matchedPart Part?         @relation(fields: [matchedPartId], references: [id])
+  listing     Listing?      @relation(fields: [listingId], references: [id])
+
+  @@unique([sessionId, rowNumber])
+  @@index([sessionId])
+  @@index([matchedPartId])
+  @@index([listingId])
+  @@map("upload_session_rows")
+}

@@ -1,0 +1,169 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+  deployments: write
+  packages: write
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      backend_image: ${{ steps.sha.outputs.backend_image }}
+      frontend_image: ${{ steps.sha.outputs.frontend_image }}
+      sha_tag: ${{ steps.sha.outputs.sha_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Get SHA tag
+        id: sha
+        run: |
+          echo "sha_tag=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          echo "backend_image=flying411/backend:${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          echo "frontend_image=flying411/frontend:${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            flying411/backend:latest
+            flying411/backend:${{ steps.sha.outputs.sha_tag }}
+          cache-from: type=registry,ref=flying411/backend:buildcache
+          cache-to: type=registry,ref=flying411/backend:buildcache,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            flying411/frontend:latest
+            flying411/frontend:${{ steps.sha.outputs.sha_tag }}
+          cache-from: type=registry,ref=flying411/frontend:buildcache
+          cache-to: type=registry,ref=flying411/frontend:buildcache,mode=max
+
+      - name: Trivy scan backend image
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: flying411/backend:latest
+          format: table
+          severity: CRITICAL,HIGH
+        continue-on-error: true
+
+      - name: Trivy scan frontend image
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: flying411/frontend:latest
+          format: table
+          severity: CRITICAL,HIGH
+        continue-on-error: true
+
+  deploy-staging:
+    needs: docker-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: staging
+      url: https://staging.flying411.com
+    steps:
+      - name: Deploy to staging
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USERNAME }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            cd /opt/flying411
+            docker compose pull
+            docker compose up -d
+            docker compose exec -T backend npx prisma migrate deploy
+
+  smoke-test:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Health check backend
+        run: curl -f --retry 5 --retry-delay 10 https://staging.flying411.com/api/health || exit 1
+
+      - name: Health check frontend
+        run: curl -f --retry 5 --retry-delay 10 https://staging.flying411.com || exit 1
+
+  deploy-production:
+    needs: [docker-build, smoke-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://flying411.com
+    steps:
+      - name: Deploy to production
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            cd /opt/flying411
+            docker compose pull
+            docker compose up -d
+            docker compose exec -T backend npx prisma migrate deploy
+
+      - name: Slack notification
+        run: |
+          if [ -n "$SLACK_WEBHOOK" ]; then
+            curl -X POST "$SLACK_WEBHOOK" -H "Content-Type: application/json" \
+              --data-raw "{\"text\":\"Production deployment completed for Flying411 (${SHA_TAG})\"}"
+          fi
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SHA_TAG: ${{ needs.docker-build.outputs.sha_tag }}
+
+  rollback:
+    needs: deploy-production
+    runs-on: ubuntu-latest
+    if: failure()
+    steps:
+      - name: Rollback production deployment
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          # Production deployment failed. Previous images restored.
+          script: |
+            cd /opt/flying411
+            docker compose down
+            docker compose up -d

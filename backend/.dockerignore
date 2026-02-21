@@ -1,0 +1,13 @@
+# Exclude heavy directories
+node_modules
+dist
+coverage
+
+# Exclude git and environment files
+.git
+.env
+.env.local
+
+# Exclude logs
+npm-debug.log
+*.log

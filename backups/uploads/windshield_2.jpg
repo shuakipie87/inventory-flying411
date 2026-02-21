@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - Page Not Found</title>
+    <!-- Load Tailwind CSS for styling --><script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #D9D9D9; /* Light grey background as requested */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px; /* Add some padding for smaller screens */
+            box-sizing: border-box;
+        }
+
+        .containers {
+            max-width: 1300px;
+            width: 90%;
+            margin: auto;
+            display: flex;
+            /*flex-direction: column;*/
+            align-items: center;
+            text-align: left;
+            gap: 40px; /* Space between the text block and the aircraft/404 */
+            /* Max width to keep content contained */
+        }
+
+        @media (max-width: 768px) {
+            .containers {
+                flex-direction: column-reverse; /* Horizontal layout on larger screens */
+                justify-content: space-between;
+                text-align: center;
+                gap: 80px;
+            }
+        }
+
+        .text-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            color: #333; /* Darker text for contrast on light background */
+        }
+
+        /* Styling for the massive 404 text on the right side graphic */
+       
+
+        @media (max-width: 768px) {
+            .error-code-graphic {
+                font-size: 8rem;
+            }
+        }
+
+        .error-message {
+            font-size: 2.5rem; /* Error message */
+            font-weight: 700;
+            color: #555;
+            line-height: 1.1;
+        }
+
+        .aircraft-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            min-height: 300px; /* Ensures the large 404 text has enough space */
+        }
+
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="containers">
+        <!-- LEFT SIDE: Text Content (Message & Button) -->
+        <div class="text-content">
+            <p class="error-message">PAGE NOT FOUND</p>
+            <p class="text-lg text-gray-700 max-w-sm mx-auto md:mx-0 mt-4">
+                Oops! It looks like this page has flown away. The flight path you followed led to an unknown destination.
+            </p>
+            <a href="/" class="mt-8 px-6 py-3 bg-gray-600 text-white font-semibold rounded-full shadow-lg hover:bg-blue-700 transition duration-300 w-fit mx-auto md:mx-0">
+                Go Back Home
+            </a>
+        </div>
+
+        <!-- RIGHT SIDE: Aircraft Graphic and 404 Layer -->
+        <div class="aircraft-section">
+          <img src="/assets/pages/img/icons/404.png" alt="White Airplane" class="aircraft-image">
+            <div class="confetti"></div>
+        </div>
+    </div>
+
+</body>
+</html>

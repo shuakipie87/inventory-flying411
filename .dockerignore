@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+*.md
+.env
+.env.local
+dist
+build
+coverage
+.vscode
+.idea
+*.log
+
+# IMPORTANT: Do NOT ignore package-lock.json - required for npm ci
+!package-lock.json
