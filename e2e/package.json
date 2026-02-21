@@ -9,7 +9,7 @@
         "test:e2e:headless": "cypress run --headless"
     },
     "devDependencies": {
-        "cypress": "^13.6.2",
+        "cypress": "^15.10.0",
         "@testing-library/cypress": "^10.0.1",
         "cypress-file-upload": "^5.0.8"
     }
