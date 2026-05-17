@@ -52,7 +52,7 @@ jobs:
           echo "frontend_image=flying411/frontend:${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
       - name: Build and push backend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./backend
           push: true
@@ -63,7 +63,7 @@ jobs:
           cache-to: type=registry,ref=flying411/backend:buildcache,mode=max
 
       - name: Build and push frontend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./frontend
           push: true
